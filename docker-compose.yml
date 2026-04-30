@@ -5,12 +5,11 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - DB_PATH=/data/bpms_web.db
-      - REPORT_PATH=/data/Reporte BPMS.xlsx
-      - LOG_PATH=/data/error.log
+      - DB_PATH=/app/bpms_web.db
+      - REPORT_PATH=/app/Reporte BPMS.xlsx
+      - LOG_PATH=/app/error.log
     volumes:
-      - bpms_data:/data
+      - ./bpms_web.db:/app/bpms_web.db
+      - ./Reporte BPMS.xlsx:/app/Reporte BPMS.xlsx
+      - ./error.log:/app/error.log
     restart: unless-stopped
-
-volumes:
-  bpms_data:

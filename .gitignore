@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.idea/
+.vscode/
+
+# Ignorar base de datos y archivos de datos sensibles/locales
+bpms_web.db
+Reporte BPMS.xlsx
+error.log
+
+# Ignorar archivos del sistema
+Thumbs.db
+desktop.ini

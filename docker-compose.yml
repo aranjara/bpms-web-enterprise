@@ -1,0 +1,11 @@
+services:
+  web:
+    build: .
+    container_name: bpms-web-enterprise
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./bpms_web.db:/app/bpms_web.db
+      - ./Reporte BPMS.xlsx:/app/Reporte BPMS.xlsx
+      - ./error.log:/app/error.log
+    restart: unless-stopped

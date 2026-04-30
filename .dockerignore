@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.git/
+.gitignore
+*.bat
+*.xlsx
+*.db
+error.log
+README.txt

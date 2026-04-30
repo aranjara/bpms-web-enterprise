@@ -617,6 +617,25 @@ def admin_hacienda():
 
     return render_template("admin_hacienda.html", title="Lista Hacienda", user=user, staff=list_hacienda_staff(), edit_staff=edit_staff)
 
+@app.route("/admin/upload", methods=["GET","POST"])
+def admin_upload():
+    user = current_user()
+    if not user or user["role"] != "admin":
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        file = request.files.get("report")
+        if file and file.filename.endswith(".xlsx"):
+            try:
+                file.save(REPORT_PATH)
+                flash("Archivo Excel actualizado correctamente.", "success")
+                return redirect(url_for("dashboard"))
+            except Exception as e:
+                log_error("admin_upload", e)
+                flash("Error al guardar el archivo.", "danger")
+        else:
+            flash("Por favor selecciona un archivo .xlsx válido.", "danger")
+    return render_template("upload.html", title="Cargar Excel", user=user)
+
 if __name__ == "__main__":
     init_db()
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)

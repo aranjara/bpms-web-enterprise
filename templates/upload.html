@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width: 500px; margin: 40px auto;">
+    <h2>Cargar Nuevo Reporte Excel</h2>
+    <p>Selecciona el archivo <strong>Reporte BPMS.xlsx</strong> actualizado. Este archivo reemplazará al actual en el servidor.</p>
+    
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group" style="margin: 20px 0;">
+            <label for="report">Archivo Excel (.xlsx):</label>
+            <input type="file" name="report" id="report" accept=".xlsx" required style="display: block; margin-top: 10px;">
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Subir y Actualizar</button>
+            <a href="{{ url_for('dashboard') }}" class="btn">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

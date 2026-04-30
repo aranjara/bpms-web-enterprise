@@ -4,8 +4,13 @@ services:
     container_name: bpms-web-enterprise
     ports:
       - "5000:5000"
+    environment:
+      - DB_PATH=/data/bpms_web.db
+      - REPORT_PATH=/data/Reporte BPMS.xlsx
+      - LOG_PATH=/data/error.log
     volumes:
-      - ./bpms_web.db:/app/bpms_web.db
-      - ./Reporte BPMS.xlsx:/app/Reporte BPMS.xlsx
-      - ./error.log:/app/error.log
+      - bpms_data:/data
     restart: unless-stopped
+
+volumes:
+  bpms_data:

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import sqlite3, hashlib, unicodedata, json, traceback, io
 from datetime import date, datetime
@@ -5,10 +6,13 @@ import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "bpms_web.db"
-REPORT_PATH = BASE_DIR / "Reporte BPMS.xlsx"
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "bpms_web.db")))
+REPORT_PATH = Path(os.getenv("REPORT_PATH", str(BASE_DIR / "Reporte BPMS.xlsx")))
 SEED_PATH = BASE_DIR / "hacienda_seed.json"
-LOG_PATH = BASE_DIR / "error.log"
+LOG_PATH = Path(os.getenv("LOG_PATH", str(BASE_DIR / "error.log")))
+
+# Asegurar que el directorio de la base de datos existe
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = "bpms-web-enterprise-local-change-this"

@@ -12,6 +12,11 @@
                 <label>Nombre de Usuario</label>
                 <input type="text" name="username" value="{{ edit_user.username if edit_user else '' }}" required>
             </div>
+
+            <div class="field">
+                <label>{% if edit_user %}Nueva Contraseña (dejar en blanco para no cambiar){% else %}Contraseña Inicial{% endif %}</label>
+                <input type="password" name="new_password" placeholder="{% if edit_user %}Escribe para cambiar...{% else %}Contraseña para el nuevo usuario{% endif %}" {% if not edit_user %}required{% endif %}>
+            </div>
             
             <div class="field">
                 <label>Nombre Completo (Funcionario)</label>
@@ -101,11 +106,6 @@
                                     <input type="hidden" name="action" value="toggle">
                                     <input type="hidden" name="user_id" value="{{ u.id }}">
                                     <button type="submit" class="btn btn-muted" style="padding: 4px 8px; font-size: 10px;" title="Activar/Desactivar">🔄</button>
-                                </form>
-                                <form method="post" style="display:inline;" onsubmit="return confirm('¿Restablecer clave a 123456?')">
-                                    <input type="hidden" name="action" value="reset">
-                                    <input type="hidden" name="user_id" value="{{ u.id }}">
-                                    <button type="submit" class="btn btn-warning" style="padding: 4px 8px; font-size: 10px;" title="Reset Clave">🔑</button>
                                 </form>
                             </div>
                         </td>

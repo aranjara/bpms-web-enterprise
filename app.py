@@ -203,22 +203,23 @@ def admin_users():
             ro = request.form.get("role")
             ac = 1 if request.form.get("is_active") == "on" else 0
             pw = 1 if request.form.get("force_password_change") == "on" else 0
+            new_pwd = request.form.get("new_password")
+            
             if act == "create":
+                initial_pwd = hash_password(new_pwd if new_pwd else "123456")
                 database.execute("INSERT INTO users(username,password_hash,role,full_name,is_active,force_password_change) VALUES (?,?,?,?,?,?)",
-                                 (un, hash_password("123456"), ro, fn, ac, pw))
+                                 (un, initial_pwd, ro, fn, ac, pw))
                 uid = database.query_one("SELECT id FROM users WHERE username=?", (un,))["id"]
             else:
                 uid = int(request.form.get("user_id"))
                 database.execute("UPDATE users SET username=?, role=?, full_name=?, is_active=?, force_password_change=? WHERE id=?", (un, ro, fn, ac, pw, uid))
+                if new_pwd:
+                    database.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_pwd), uid))
                 database.execute("DELETE FROM user_permissions WHERE user_id=?", (uid,))
             
             perms = request.form.getlist("permissions") if ro == "user" else [s["name"] for s in database.query_all("SELECT name FROM hacienda_staff WHERE include_flag=1")]
             for p in perms: database.execute("INSERT INTO user_permissions(user_id, funcionario_name) VALUES (?,?)", (uid, p))
             flash("Usuario guardado", "success")
-        elif act == "reset":
-            uid = int(request.form.get("user_id"))
-            database.execute("UPDATE users SET password_hash=?, force_password_change=1 WHERE id=?", (hash_password("123456"), uid))
-            flash("Clave reseteada", "success")
         elif act == "toggle":
             uid = int(request.form.get("user_id"))
             database.execute("UPDATE users SET is_active = 1 - is_active WHERE id=?", (uid,))

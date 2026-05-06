@@ -1,1 +1,40 @@
-<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Control BPMS Web - Login</title><link rel='stylesheet' href='{{ url_for("static", filename="styles.css") }}'></head><body class='login-body'><div class='login-card'><h1>Control BPMS Web</h1>{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class='flash {{ category }}'>{{ message }}</div>{% endfor %}{% endwith %}<form method='post'><label>Usuario</label><input type='text' name='username' required><label>Contraseña</label><input type='password' name='password' required><button type='submit'>Ingresar</button></form></div></body></html>
+{% extends "base.html" %}
+
+{% block content %}
+<div class="login-body">
+    <div class="login-card glass">
+        <h2>Tablero Control BPMS</h2>
+        
+        <form method="post" class="stack" style="margin-top: 1rem;">
+            <div class="field">
+                <label>Usuario</label>
+                <input type="text" name="username" required autofocus placeholder="Tu nombre de usuario">
+            </div>
+            
+            <div class="field">
+                <label>Contraseña</label>
+                <input type="password" name="password" required placeholder="">
+            </div>
+            
+            <button type="submit" class="btn btn-primary" style="justify-content: center; padding: 0.8rem; margin-top: 1.5rem;">
+                🚀 Entrar al Sistema
+            </button>
+        </form>
+        
+        <div style="margin-top: 2.5rem; text-align: center;">
+            <img src="/static/images/escudo_rionegro.png" alt="Escudo Rionegro" style="height: 100px; width: auto; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));">
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('load', () => {
+        gsap.from(".login-card", {
+            duration: 1.2,
+            y: 50,
+            opacity: 0,
+            ease: "power4.out"
+        });
+    });
+</script>
+{% endblock %}

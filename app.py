@@ -1,313 +1,53 @@
-import os
-from pathlib import Path
-import sqlite3, hashlib, unicodedata, json, traceback, io
-from datetime import date, datetime
+import os, hashlib, json, traceback, io
 import pandas as pd
+from datetime import datetime
+from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
+from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "bpms_web.db")))
-REPORT_PATH = Path(os.getenv("REPORT_PATH", str(BASE_DIR / "Reporte BPMS.xlsx")))
-SEED_PATH = BASE_DIR / "hacienda_seed.json"
-LOG_PATH = Path(os.getenv("LOG_PATH", str(BASE_DIR / "error.log")))
+import database
+import bpms_service
 
-# Asegurar que el directorio de la base de datos existe
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = "bpms-web-enterprise-local-change-this"
+app.secret_key = os.getenv("SECRET_KEY", "dev-key-fallback")
+UPLOAD_FOLDER = Path(os.getenv("UPLOAD_FOLDER", "uploads"))
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
-def normalize_text(value):
-    if value is None:
-        return ""
-    value = str(value).strip().upper()
-    value = "".join(ch for ch in unicodedata.normalize("NFD", value) if unicodedata.category(ch) != "Mn")
-    while "  " in value:
-        value = value.replace("  ", " ")
-    return value
-
+# Helper functions
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def query_all(sql, params=()):
-    conn = db()
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
-    return rows
-
-def query_one(sql, params=()):
-    conn = db()
-    row = conn.execute(sql, params).fetchone()
-    conn.close()
-    return row
-
-def execute(sql, params=()):
-    conn = db()
-    conn.execute(sql, params)
-    conn.commit()
-    conn.close()
-
 def log_error(where, exc):
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write("\n" + "="*80 + "\n")
-            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {where}\n")
-            f.write(str(exc) + "\n")
-            f.write(traceback.format_exc() + "\n")
-    except Exception:
-        pass
-
-def init_db():
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','user')), full_name TEXT, is_active INTEGER DEFAULT 1, force_password_change INTEGER DEFAULT 1, last_login_at TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS user_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, funcionario_name TEXT NOT NULL, UNIQUE(user_id, funcionario_name))")
-    cur.execute("CREATE TABLE IF NOT EXISTS bpms_updates (id INTEGER PRIMARY KEY AUTOINCREMENT, radicado TEXT UNIQUE NOT NULL, observaciones TEXT, estado_tramite_actual TEXT, fecha_vencimiento TEXT, updated_by TEXT, updated_at TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS hacienda_staff (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, status TEXT, dependency TEXT, include_flag INTEGER DEFAULT 1)")
-    conn.commit()
-    if not cur.execute("SELECT 1 FROM users WHERE username='admin'").fetchone():
-        cur.execute("INSERT INTO users(username,password_hash,role,full_name,is_active,force_password_change) VALUES (?,?,?,?,1,0)", ("admin", hash_password("admin123"), "admin", "ADMINISTRADOR"))
-        conn.commit()
-    total_staff = cur.execute("SELECT COUNT(*) AS t FROM hacienda_staff").fetchone()["t"]
-    if total_staff == 0 and SEED_PATH.exists():
-        data = json.loads(SEED_PATH.read_text(encoding='utf-8'))
-        cur.executemany("INSERT INTO hacienda_staff(name,status,dependency,include_flag) VALUES (?,?,?,?)", [(normalize_text(n), s, d, int(i)) for n, s, d, i in data])
-        conn.commit()
-    conn.close()
-
-def get_user(username):
-    return query_one("SELECT * FROM users WHERE username=?", (username,))
-
-def get_user_by_id(user_id):
-    return query_one("SELECT * FROM users WHERE id=?", (user_id,))
-
-def get_staff_by_id(staff_id):
-    return query_one("SELECT * FROM hacienda_staff WHERE id=?", (staff_id,))
+    log_path = os.getenv("LOG_PATH", "error.log")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"\n[{datetime.now()}] {where}: {exc}\n{traceback.format_exc()}\n")
 
 def current_user():
     username = session.get("username")
-    return get_user(username) if username else None
-
-def authenticate(username, password):
-    user = get_user(username)
-    if user and int(user["is_active"]) == 1 and user["password_hash"] == hash_password(password):
-        execute("UPDATE users SET last_login_at=? WHERE id=?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user["id"]))
-        return get_user(username)
-    return None
-
-def verify_user_password(user_id, password):
-    row = query_one("SELECT password_hash FROM users WHERE id=?", (user_id,))
-    return bool(row and row["password_hash"] == hash_password(password))
-
-def change_user_password(user_id, new_password):
-    execute("UPDATE users SET password_hash=?, force_password_change=0 WHERE id=?", (hash_password(new_password), user_id))
-
-def allowed_hacienda_names():
-    return [r["name"] for r in query_all("SELECT name FROM hacienda_staff WHERE include_flag=1 ORDER BY name")]
-
-def list_hacienda_staff():
-    return query_all("SELECT * FROM hacienda_staff ORDER BY include_flag DESC, name")
-
-def list_users():
-    allowed = set(allowed_hacienda_names())
-    rows = query_all("SELECT * FROM users ORDER BY role DESC, full_name, username")
-    return [r for r in rows if r["role"] == "admin" or normalize_text(r["full_name"]) in allowed]
-
-def get_user_permissions(user_id):
-    return [r["funcionario_name"] for r in query_all("SELECT funcionario_name FROM user_permissions WHERE user_id=? ORDER BY funcionario_name", (user_id,))]
-
-def make_username(full_name, existing_usernames=None):
-    existing_usernames = existing_usernames or set()
-    parts = [p.lower() for p in normalize_text(full_name).split() if p]
-    if not parts:
-        candidate = "usuario"
-    else:
-        first_initial = parts[0][0]
-        surname = parts[-2] if len(parts) >= 3 else parts[-1]
-        candidate = f"{first_initial}{surname}"
-        if candidate in existing_usernames and len(parts) >= 2:
-            candidate = f"{first_initial}{parts[1][0]}{surname}"
-        base = candidate
-        i = 2
-        while candidate in existing_usernames:
-            candidate = f"{base}{i}"
-            i += 1
-    return candidate
-
-def sync_users_from_hacienda():
-    existing = list_users()
-    names = {normalize_text(u["full_name"]): u for u in existing}
-    usernames = {u["username"] for u in existing}
-    created = 0
-    for row in list_hacienda_staff():
-        if int(row["include_flag"]) != 1:
-            continue
-        full_name = normalize_text(row["name"])
-        if not full_name or full_name in names:
-            continue
-        username = make_username(full_name, usernames)
-        conn = db()
-        conn.execute("INSERT INTO users(username,password_hash,role,full_name,is_active,force_password_change) VALUES (?,?,?,?,1,1)", (username, hash_password("123456"), "user", full_name))
-        uid = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()["id"]
-        conn.execute("INSERT OR IGNORE INTO user_permissions(user_id, funcionario_name) VALUES (?,?)", (uid, full_name))
-        conn.commit()
-        conn.close()
-        usernames.add(username)
-        created += 1
-    return created
-
-def bpms_status(value):
-    if pd.isna(value):
-        return "SIN FECHA"
-    days = (value.date() - date.today()).days
-    if days < 0:
-        return "VENCIDO"
-    if days <= 3:
-        return "POR VENCER"
-    return "EN MARCHA"
-
-def days_left(value):
-    if pd.isna(value):
-        return None
-    if isinstance(value, str):
-        value = pd.to_datetime(value, errors="coerce")
-        if pd.isna(value):
-            return None
-    return (value.date() - date.today()).days
+    return database.query_one("SELECT * FROM users WHERE username=?", (username,)) if username else None
 
 def fmt_date(value):
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return ""
-        value = value.replace("/", "-")
-        try:
-            value = pd.to_datetime(value, errors="coerce", dayfirst=False)
-        except Exception:
-            return ""
-    if pd.isna(value):
-        return ""
-    try:
-        return value.strftime("%Y-%m-%d")
-    except Exception:
-        return ""
+    if not value or str(value) == 'NaT': return ""
+    return value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else str(value)
 
-def normalize_input_date(value):
-    if value is None:
-        return ""
-    value = str(value).strip()
-    if not value:
-        return ""
-    value = value.replace("/", "-")
-    try:
-        dt = pd.to_datetime(value, errors="coerce", dayfirst=False)
-        if pd.isna(dt):
-            return ""
-        return dt.strftime("%Y-%m-%d")
-    except Exception:
-        return ""
-
-def load_bpms():
-    if not REPORT_PATH.exists():
-        return pd.DataFrame()
-    xl = pd.ExcelFile(REPORT_PATH)
-    df = pd.read_excel(REPORT_PATH, sheet_name=xl.sheet_names[0])
-    df["RADICADO"] = df["radicado_inicial"].astype(str).str.strip() if "radicado_inicial" in df.columns else df.iloc[:,0].astype(str).str.strip()
-    if "usuario_responsable_actividad" in df.columns:
-        df["FUNCIONARIO"] = df["usuario_responsable_actividad"].apply(normalize_text)
-    else:
-        df["FUNCIONARIO"] = df.iloc[:,16].apply(normalize_text) if len(df.columns) > 16 else ""
-    df["TIPO_SOLICITUD"] = df["descripcion"].fillna("").astype(str) if "descripcion" in df.columns else ""
-    df["FECHA_VENCIMIENTO"] = pd.to_datetime(df["fecha_vencimiento"], errors="coerce") if "fecha_vencimiento" in df.columns else pd.NaT
-    df["ESTADO_TRAMITE_ACTUAL"] = df["estado_tramite"].fillna("").astype(str) if "estado_tramite" in df.columns else ""
-    df["OBSERVACIONES"] = ""
-    allowed = set(allowed_hacienda_names())
-    if allowed:
-        df = df[df["FUNCIONARIO"].isin(allowed)].copy()
-    conn = db()
-    updates = pd.read_sql_query("SELECT * FROM bpms_updates", conn)
-    conn.close()
-    if not updates.empty:
-        updates["radicado"] = updates["radicado"].astype(str).str.strip()
-        updates["fecha_vencimiento"] = pd.to_datetime(updates["fecha_vencimiento"], errors="coerce")
-        updates = updates.rename(columns={
-            "observaciones": "OBSERVACIONES_DB",
-            "estado_tramite_actual": "ESTADO_TRAMITE_ACTUAL_DB",
-            "fecha_vencimiento": "FECHA_VENCIMIENTO_DB",
-        })
-        df = df.merge(
-            updates[["radicado", "OBSERVACIONES_DB", "ESTADO_TRAMITE_ACTUAL_DB", "FECHA_VENCIMIENTO_DB"]],
-            left_on="RADICADO",
-            right_on="radicado",
-            how="left"
-        )
-        df["OBSERVACIONES"] = df["OBSERVACIONES_DB"].fillna("")
-        df["ESTADO_TRAMITE_ACTUAL"] = df["ESTADO_TRAMITE_ACTUAL_DB"].fillna(df["ESTADO_TRAMITE_ACTUAL"])
-        df["FECHA_VENCIMIENTO"] = df["FECHA_VENCIMIENTO_DB"].combine_first(df["FECHA_VENCIMIENTO"])
-    for c in ["radicado", "OBSERVACIONES_DB", "ESTADO_TRAMITE_ACTUAL_DB", "FECHA_VENCIMIENTO_DB"]:
-        if c in df.columns:
-            df.drop(columns=[c], inplace=True)
-    df["CONTROL_VENCIMIENTO"] = df["FECHA_VENCIMIENTO"].apply(bpms_status)
-    df["DIAS_RESTANTES"] = df["FECHA_VENCIMIENTO"].apply(days_left)
-    return df[["RADICADO","FUNCIONARIO","TIPO_SOLICITUD","FECHA_VENCIMIENTO","DIAS_RESTANTES","CONTROL_VENCIMIENTO","ESTADO_TRAMITE_ACTUAL","OBSERVACIONES"]].copy()
-
-def filtered_bpms(user, funcionario="TODOS", estado="TODOS", buscar=""):
-    df = load_bpms()
-    if df.empty:
-        return df
-    if user["role"] != "admin":
-        allowed = set(get_user_permissions(user["id"]))
-        if allowed:
-            df = df[df["FUNCIONARIO"].isin(allowed)]
-            if funcionario and funcionario != "TODOS":
-                df = df[df["FUNCIONARIO"] == normalize_text(funcionario)]
-        else:
-            df = df[df["FUNCIONARIO"] == normalize_text(user["full_name"])]
-    else:
-        if funcionario and funcionario != "TODOS":
-            df = df[df["FUNCIONARIO"] == normalize_text(funcionario)]
-    if estado and estado != "TODOS":
-        df = df[df["CONTROL_VENCIMIENTO"] == estado]
-    buscar = (buscar or "").strip().lower()
-    if buscar:
-        mask = (
-            df["RADICADO"].astype(str).str.lower().str.contains(buscar, na=False) |
-            df["FUNCIONARIO"].astype(str).str.lower().str.contains(buscar, na=False) |
-            df["TIPO_SOLICITUD"].astype(str).str.lower().str.contains(buscar, na=False) |
-            df["ESTADO_TRAMITE_ACTUAL"].astype(str).str.lower().str.contains(buscar, na=False) |
-            df["OBSERVACIONES"].astype(str).str.lower().str.contains(buscar, na=False)
-        )
-        df = df[mask]
-    order_map = {"VENCIDO":0, "POR VENCER":1, "EN MARCHA":2, "SIN FECHA":3}
-    df["ORDEN"] = df["CONTROL_VENCIMIENTO"].map(order_map).fillna(9)
-    df = df.sort_values(by=["ORDEN","FECHA_VENCIMIENTO"], ascending=[True,True], na_position="last")
-    return df.drop(columns=["ORDEN"], errors="ignore")
-
-def find_single_bpms_row(radicado, user):
-    df = filtered_bpms(user, "TODOS", "TODOS", "")
-    match = df[df["RADICADO"].astype(str) == str(radicado).strip()]
-    if match.empty:
-        return None
-    return match.iloc[0].to_dict()
-
+# Routes
 @app.route("/", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        user = authenticate(request.form.get("username",""), request.form.get("password",""))
-        if user:
+        u, p = request.form.get("username",""), request.form.get("password","")
+        user = database.query_one("SELECT * FROM users WHERE username=? AND is_active=1", (u,))
+        if user and user["password_hash"] == hash_password(p):
             session["username"] = user["username"]
+            database.execute("UPDATE users SET last_login_at=? WHERE id=?", (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user["id"]))
+            database.execute("INSERT INTO audit_logs(user_id, action, details, created_at) VALUES (?,?,?,?)",
+                            (user["id"], "LOGIN", f"Acceso exitoso: {u}", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             if int(user["force_password_change"]) == 1:
-                flash("Debes cambiar tu contraseña antes de continuar.", "danger")
+                flash("Debes cambiar tu contraseña.", "danger")
                 return redirect(url_for("change_password"))
             return redirect(url_for("dashboard"))
-        flash("Usuario o contraseña incorrectos", "danger")
+        flash("Credenciales inválidas", "danger")
     return render_template("login.html")
 
 @app.route("/logout")
@@ -318,324 +58,381 @@ def logout():
 @app.route("/dashboard")
 def dashboard():
     user = current_user()
-    if not user:
-        return redirect(url_for("login"))
-    funcionario = request.args.get("funcionario","TODOS")
-    estado = request.args.get("estado","TODOS")
-    buscar = request.args.get("buscar","")
-    df = filtered_bpms(user, funcionario, estado, buscar)
+    if not user: return redirect(url_for("login"))
+    
+    func = request.args.get("funcionario","TODOS")
+    stat = request.args.get("estado","TODOS")
+    seek = request.args.get("buscar","")
+    
+    df = bpms_service.get_filtered_data(user, func, stat, seek)
+
     counts = {
-        "total": int(len(df)),
-        "en_marcha": int((df["CONTROL_VENCIMIENTO"]=="EN MARCHA").sum()) if not df.empty else 0,
-        "por_vencer": int((df["CONTROL_VENCIMIENTO"]=="POR VENCER").sum()) if not df.empty else 0,
-        "vencidos": int((df["CONTROL_VENCIMIENTO"]=="VENCIDO").sum()) if not df.empty else 0,
-        "sin_fecha": int((df["CONTROL_VENCIMIENTO"]=="SIN FECHA").sum()) if not df.empty else 0,
+        "total": len(df),
+        "en_marcha": int((df["CONTROL_VENCIMIENTO"]=="EN MARCHA").sum()),
+        "por_vencer": int((df["CONTROL_VENCIMIENTO"]=="POR VENCER").sum()),
+        "vencidos": int((df["CONTROL_VENCIMIENTO"]=="VENCIDO").sum()),
+        "sin_fecha": int((df["CONTROL_VENCIMIENTO"]=="SIN FECHA").sum()),
     }
-    if user["role"] == "admin":
-        funcionarios = ["TODOS"] + allowed_hacienda_names()
-    else:
-        perms = sorted(get_user_permissions(user["id"]))
-        funcionarios = ["TODOS"] + perms if len(perms) > 1 else (perms or [normalize_text(user["full_name"])])
-    rows = []
-    for _,r in df.head(300).iterrows():
-        rows.append({
-            "RADICADO": r["RADICADO"],
-            "FUNCIONARIO": r["FUNCIONARIO"],
-            "TIPO_SOLICITUD": r["TIPO_SOLICITUD"],
-            "FECHA_VENCIMIENTO": fmt_date(r["FECHA_VENCIMIENTO"]),
-            "DIAS_RESTANTES": "" if pd.isna(r["DIAS_RESTANTES"]) else int(r["DIAS_RESTANTES"]),
-            "CONTROL_VENCIMIENTO": r["CONTROL_VENCIMIENTO"],
-            "ESTADO_TRAMITE_ACTUAL": r["ESTADO_TRAMITE_ACTUAL"],
-            "OBSERVACIONES": r["OBSERVACIONES"],
-        })
-    return render_template("dashboard.html", title="Dashboard", user=user, counts=counts, rows=rows, funcionarios=funcionarios, funcionario_actual=funcionario, estado_actual=estado, buscar_actual=buscar)
 
-@app.route("/ranking")
-def ranking():
-    user = current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    funcionario = request.args.get("funcionario", "TODOS")
-    estado = request.args.get("estado", "TODOS")
-    buscar = request.args.get("buscar", "")
-
-    df = filtered_bpms(user, funcionario, estado, buscar)
-    ranking_rows = []
+    # Chart data
+    chart_data = {"staff_labels": [], "staff_values": []}
     if not df.empty:
-        grp = df.groupby("FUNCIONARIO").agg(
-            TOTAL=("RADICADO", "count"),
-            EN_MARCHA=("CONTROL_VENCIMIENTO", lambda s: int((s == "EN MARCHA").sum())),
-            POR_VENCER=("CONTROL_VENCIMIENTO", lambda s: int((s == "POR VENCER").sum())),
-            VENCIDOS=("CONTROL_VENCIMIENTO", lambda s: int((s == "VENCIDO").sum())),
-        ).reset_index().sort_values(["TOTAL", "VENCIDOS", "POR_VENCER"], ascending=[False, False, False])
+        top = df["FUNCIONARIO"].value_counts().head(10)
+        chart_data["staff_labels"] = list(top.index)
+        chart_data["staff_values"] = [int(v) for v in top.values]
 
-        for _, rr in grp.iterrows():
-            ranking_rows.append({
-                "FUNCIONARIO": rr["FUNCIONARIO"],
-                "TOTAL": int(rr["TOTAL"]),
-                "EN_MARCHA": int(rr["EN_MARCHA"]),
-                "POR_VENCER": int(rr["POR_VENCER"]),
-                "VENCIDOS": int(rr["VENCIDOS"]),
-            })
+    # Allowed officials for filter
+    if user["role"] == "admin":
+        hacienda = [s["name"] for s in database.query_all("SELECT name FROM hacienda_staff WHERE include_flag=1 ORDER BY name")]
+        funcionarios = ["TODOS"] + hacienda
+    else:
+        perms = [p["funcionario_name"] for p in database.query_all("SELECT funcionario_name FROM user_permissions WHERE user_id=?", (user["id"],))]
+        funcionarios = ["TODOS"] + sorted(perms) if len(perms) > 1 else (perms or [bpms_service.normalize_text(user["full_name"])])
 
-    return render_template(
-        "ranking.html",
-        title="Ranking",
-        user=user,
-        ranking_rows=ranking_rows,
-        funcionario_actual=funcionario,
-        estado_actual=estado,
-        buscar_actual=buscar,
-    )
+    return render_template("dashboard.html", title="Dashboard", user=user, counts=counts, 
+                           funcionarios=funcionarios, funcionario_actual=func, estado_actual=stat, buscar_actual=seek,
+                           chart_data=chart_data)
 
-
-@app.route("/export")
-def export_preview():
+@app.route("/registros")
+def registros():
     user = current_user()
-    if not user:
-        return redirect(url_for("login"))
+    if not user: return redirect(url_for("login"))
+    
+    func = request.args.get("funcionario","TODOS")
+    stat = request.args.get("estado","TODOS")
+    seek = request.args.get("buscar","")
+    page = request.args.get("page", 1, type=int)
+    
+    df = bpms_service.get_filtered_data(user, func, stat, seek)
+    per_page = 50
+    total_pages = (len(df) + per_page - 1) // per_page
+    df_paged = df.iloc[(page-1)*per_page : page*per_page]
 
-    funcionario = request.args.get("funcionario", "TODOS")
-    estado = request.args.get("estado", "TODOS")
-    buscar = request.args.get("buscar", "")
+    rows = []
+    for _, r in df_paged.iterrows():
+        rows.append({
+            "RADICADO": r["RADICADO"], "FUNCIONARIO": r["FUNCIONARIO"], "TIPO_SOLICITUD": r["TIPO_SOLICITUD"],
+            "FECHA_VENCIMIENTO": fmt_date(r["FECHA_VENCIMIENTO"]), "DIAS_RESTANTES": int(r["DIAS_RESTANTES"]) if not bpms_service.pd.isna(r["DIAS_RESTANTES"]) else "",
+            "CONTROL_VENCIMIENTO": r["CONTROL_VENCIMIENTO"], "ESTADO_TRAMITE_ACTUAL": r["ESTADO_TRAMITE_ACTUAL"], "OBSERVACIONES": r["OBSERVACIONES"]
+        })
 
-    df = filtered_bpms(user, funcionario, estado, buscar).copy()
-    if df.empty:
-        flash("No hay datos para exportar con los filtros actuales.", "danger")
-        return redirect(url_for("dashboard", funcionario=funcionario, estado=estado, buscar=buscar))
+    # Allowed officials for filter
+    if user["role"] == "admin":
+        hacienda = [s["name"] for s in database.query_all("SELECT name FROM hacienda_staff WHERE include_flag=1 ORDER BY name")]
+        funcionarios = ["TODOS"] + hacienda
+    else:
+        perms = [p["funcionario_name"] for p in database.query_all("SELECT funcionario_name FROM user_permissions WHERE user_id=?", (user["id"],))]
+        funcionarios = ["TODOS"] + sorted(perms) if len(perms) > 1 else (perms or [bpms_service.normalize_text(user["full_name"])])
 
-    export_df = df.copy()
-    export_df["FECHA_VENCIMIENTO"] = export_df["FECHA_VENCIMIENTO"].apply(fmt_date)
-
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        export_df.to_excel(writer, sheet_name="BPMS", index=False)
-        summary = pd.DataFrame([{
-            "total": int(len(df)),
-            "en_marcha": int((df["CONTROL_VENCIMIENTO"]=="EN MARCHA").sum()),
-            "por_vencer": int((df["CONTROL_VENCIMIENTO"]=="POR VENCER").sum()),
-            "vencidos": int((df["CONTROL_VENCIMIENTO"]=="VENCIDO").sum()),
-            "sin_fecha": int((df["CONTROL_VENCIMIENTO"]=="SIN FECHA").sum()),
-            "funcionario_filtro": funcionario,
-            "estado_filtro": estado,
-            "buscar": buscar,
-        }])
-        summary.to_excel(writer, sheet_name="Resumen", index=False)
-    output.seek(0)
-
-    filename = f"BPMS_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return send_file(output, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-
-@app.route("/change-password", methods=["GET","POST"])
-def change_password():
-    user = current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    force_mode = int(user["force_password_change"]) == 1
-
-    if request.method == "POST":
-        old_password = request.form.get("old_password", "").strip()
-        new_password = request.form.get("new_password", "").strip()
-        confirm_password = request.form.get("confirm_password", "").strip()
-
-        if not verify_user_password(user["id"], old_password):
-            flash("La contraseña actual no es correcta.", "danger")
-        elif len(new_password) < 6:
-            flash("La nueva contraseña debe tener al menos 6 caracteres.", "danger")
-        elif new_password != confirm_password:
-            flash("La nueva contraseña y su confirmación no coinciden.", "danger")
-        elif old_password == new_password:
-            flash("La nueva contraseña debe ser diferente a la actual.", "danger")
-        else:
-            change_user_password(user["id"], new_password)
-            flash("Contraseña actualizada correctamente.", "success")
-            return redirect(url_for("dashboard"))
-
-    return render_template("change_password.html", title="Cambiar contraseña", user=user, force_mode=force_mode)
-
+    return render_template("registros.html", title="Registros", user=user, rows=rows, 
+                           funcionarios=funcionarios, funcionario_actual=func, estado_actual=stat, buscar_actual=seek,
+                           page=page, total_pages=total_pages)
 
 @app.route("/edit/<radicado>", methods=["GET","POST"])
 def edit_bpms(radicado):
     user = current_user()
-    if not user:
-        return redirect(url_for("login"))
-    row = find_single_bpms_row(radicado, user)
-    if row is None:
-        flash("No tienes acceso a ese radicado o no existe en la base filtrada.", "danger")
-        return redirect(url_for("dashboard"))
+    if not user: return redirect(url_for("login"))
+    
     if request.method == "POST":
-        estado = request.form.get("estado","").strip()
-        fecha = normalize_input_date(request.form.get("fecha", "").strip())
-        observaciones = request.form.get("observaciones","").strip()
-        try:
-            conn = db()
-            conn.execute("""
-                INSERT INTO bpms_updates(radicado, observaciones, estado_tramite_actual, fecha_vencimiento, updated_by, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(radicado) DO UPDATE SET
-                    observaciones=excluded.observaciones,
-                    estado_tramite_actual=excluded.estado_tramite_actual,
-                    fecha_vencimiento=excluded.fecha_vencimiento,
-                    updated_by=excluded.updated_by,
-                    updated_at=excluded.updated_at
-            """, (str(radicado).strip(), observaciones, estado, fecha, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            conn.commit()
-            conn.close()
-            flash("Registro actualizado correctamente.", "success")
-            return redirect(url_for("dashboard"))
-        except Exception as e:
-            log_error("edit_bpms_save", e)
-            flash("Ocurrió un error al guardar. Revisa error.log", "danger")
-    data = query_one("SELECT * FROM bpms_updates WHERE radicado=?", (str(radicado).strip(),))
-    current_fecha = ""
-    if data and data["fecha_vencimiento"]:
-        current_fecha = normalize_input_date(data["fecha_vencimiento"])
-    elif row.get("FECHA_VENCIMIENTO"):
-        current_fecha = normalize_input_date(row.get("FECHA_VENCIMIENTO"))
-    return render_template("edit.html", title="Editar BPMS", user=user, radicado=radicado, row=row, data=data, current_fecha=current_fecha)
+        est = request.form.get("estado","").strip()
+        fec = request.form.get("fecha","").strip()
+        obs = request.form.get("observaciones","").strip()
+        database.execute("""
+            INSERT INTO bpms_updates(radicado, observaciones, estado_tramite_actual, fecha_vencimiento, updated_by, updated_at)
+            VALUES (?,?,?,?,?,?) ON CONFLICT(radicado) DO UPDATE SET 
+            observaciones=excluded.observaciones, estado_tramite_actual=excluded.estado_tramite_actual, 
+            fecha_vencimiento=excluded.fecha_vencimiento, updated_by=excluded.updated_by, updated_at=excluded.updated_at
+        """, (radicado, obs, est, fec, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        database.execute("INSERT INTO audit_logs(user_id, action, details, radicado, created_at) VALUES (?,?,?,?,?)",
+                        (user["id"], "EDIT_BPMS", f"Cambios en radicado {radicado}", radicado, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        bpms_service.load_bpms(force_reload=True)
+        flash("Actualizado correctamente", "success")
+        return redirect(url_for("dashboard"))
+
+    df = bpms_service.load_bpms()
+    row = df[df["RADICADO"] == str(radicado)].iloc[0].to_dict() if not df[df["RADICADO"] == str(radicado)].empty else None
+    if not row: return redirect(url_for("dashboard"))
+    
+    data = database.query_one("SELECT * FROM bpms_updates WHERE radicado=?", (radicado,))
+    attachments = database.query_all("SELECT * FROM attachments WHERE radicado=? ORDER BY uploaded_at DESC", (radicado,))
+    curr_fec = data["fecha_vencimiento"] if data and data["fecha_vencimiento"] else fmt_date(row["FECHA_VENCIMIENTO"])
+    
+    return render_template("edit.html", title="Editar", user=user, radicado=radicado, row=row, data=data, current_fecha=curr_fec, attachments=attachments)
+
+@app.route("/admin/audit")
+def admin_audit():
+    user = current_user()
+    if not user or user["role"] != "admin": return redirect(url_for("login"))
+    
+    uid = request.args.get("user_id", "")
+    start = request.args.get("start_date", "")
+    end = request.args.get("end_date", "")
+    
+    query = "SELECT a.*, u.username FROM audit_logs a LEFT JOIN users u ON a.user_id = u.id WHERE 1=1"
+    params = []
+    
+    if uid:
+        query += " AND a.user_id = ?"
+        params.append(uid)
+    if start:
+        query += " AND a.created_at >= ?"
+        params.append(f"{start} 00:00:00")
+    if end:
+        query += " AND a.created_at <= ?"
+        params.append(f"{end} 23:59:59")
+        
+    query += " ORDER BY a.created_at DESC LIMIT 500"
+    logs = database.query_all(query, tuple(params))
+    users = database.query_all("SELECT id, username, full_name FROM users ORDER BY full_name")
+    
+    return render_template("admin_audit.html", title="Auditoría", user=user, logs=logs, 
+                           users_list=users, current_uid=uid, current_start=start, current_end=end)
 
 @app.route("/admin/users", methods=["GET","POST"])
 def admin_users():
     user = current_user()
-    if not user or user["role"] != "admin":
-        return redirect(url_for("login"))
-
-    edit_user_id = request.args.get("edit_user_id", "")
-    edit_user = get_user_by_id(int(edit_user_id)) if str(edit_user_id).isdigit() else None
-
+    if not user or user["role"] != "admin": return redirect(url_for("login"))
+    edit_id = request.args.get("edit_user_id")
+    edit_user = database.query_one("SELECT * FROM users WHERE id=?", (edit_id,)) if edit_id else None
+    
     if request.method == "POST":
-        action = request.form.get("action","create")
-        if action == "create":
-            username = request.form.get("username","").strip()
-            full_name = normalize_text(request.form.get("full_name",""))
-            role = request.form.get("role","user")
-            is_active = 1 if request.form.get("is_active") == "on" else 0
-            perms = request.form.getlist("permissions")
-            force_password_change = 1 if request.form.get("force_password_change") == "on" else 0
-            if not username:
-                flash("Escribe un usuario.", "danger")
+        act = request.form.get("action")
+        if act in ["create", "update"]:
+            un = request.form.get("username").strip()
+            fn = bpms_service.normalize_text(request.form.get("full_name"))
+            ro = request.form.get("role")
+            ac = 1 if request.form.get("is_active") == "on" else 0
+            pw = 1 if request.form.get("force_password_change") == "on" else 0
+            if act == "create":
+                database.execute("INSERT INTO users(username,password_hash,role,full_name,is_active,force_password_change) VALUES (?,?,?,?,?,?)",
+                                 (un, hash_password("123456"), ro, fn, ac, pw))
+                uid = database.query_one("SELECT id FROM users WHERE username=?", (un,))["id"]
             else:
-                try:
-                    conn = db()
-                    conn.execute("INSERT INTO users(username,password_hash,role,full_name,is_active,force_password_change) VALUES (?,?,?,?,?,?)", (username, hash_password("123456"), role, full_name, is_active, force_password_change or 1))
-                    uid = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()["id"]
-                    if role == "admin":
-                        perms = allowed_hacienda_names()
-                    for name in perms:
-                        conn.execute("INSERT OR IGNORE INTO user_permissions(user_id, funcionario_name) VALUES (?,?)", (uid, normalize_text(name)))
-                    conn.commit()
-                    conn.close()
-                    flash("Usuario creado. Clave temporal: 123456", "success")
-                except sqlite3.IntegrityError:
-                    flash("Ese usuario ya existe.", "danger")
-
-        elif action == "update":
+                uid = int(request.form.get("user_id"))
+                database.execute("UPDATE users SET username=?, role=?, full_name=?, is_active=?, force_password_change=? WHERE id=?", (un, ro, fn, ac, pw, uid))
+                database.execute("DELETE FROM user_permissions WHERE user_id=?", (uid,))
+            
+            perms = request.form.getlist("permissions") if ro == "user" else [s["name"] for s in database.query_all("SELECT name FROM hacienda_staff WHERE include_flag=1")]
+            for p in perms: database.execute("INSERT INTO user_permissions(user_id, funcionario_name) VALUES (?,?)", (uid, p))
+            flash("Usuario guardado", "success")
+        elif act == "reset":
             uid = int(request.form.get("user_id"))
-            username = request.form.get("username","").strip()
-            full_name = normalize_text(request.form.get("full_name",""))
-            role = request.form.get("role","user")
-            is_active = 1 if request.form.get("is_active") == "on" else 0
-            perms = request.form.getlist("permissions")
-            force_password_change = 1 if request.form.get("force_password_change") == "on" else 0
-            try:
-                conn = db()
-                conn.execute("UPDATE users SET username=?, role=?, full_name=?, is_active=?, force_password_change=? WHERE id=?", (username, role, full_name, is_active, force_password_change, uid))
-                conn.execute("DELETE FROM user_permissions WHERE user_id=?", (uid,))
-                if role == "admin":
-                    perms = allowed_hacienda_names()
-                for name in perms:
-                    conn.execute("INSERT OR IGNORE INTO user_permissions(user_id, funcionario_name) VALUES (?,?)", (uid, normalize_text(name)))
-                conn.commit()
-                conn.close()
-                flash("Usuario actualizado correctamente.", "success")
-            except sqlite3.IntegrityError:
-                flash("No se pudo actualizar. El usuario ya existe.", "danger")
-
-        elif action == "reset":
+            database.execute("UPDATE users SET password_hash=?, force_password_change=1 WHERE id=?", (hash_password("123456"), uid))
+            flash("Clave reseteada", "success")
+        elif act == "toggle":
             uid = int(request.form.get("user_id"))
-            execute("UPDATE users SET password_hash=?, force_password_change=1 WHERE id=?", (hash_password("123456"), uid))
-            flash("Clave restablecida a 123456", "success")
-
-        elif action == "toggle":
-            uid = int(request.form.get("user_id"))
-            target = get_user_by_id(uid)
-            if target and target["username"] != "admin":
-                execute("UPDATE users SET is_active=? WHERE id=?", (0 if int(target["is_active"]) else 1, uid))
-                flash("Estado del usuario actualizado.", "success")
-
+            database.execute("UPDATE users SET is_active = 1 - is_active WHERE id=?", (uid,))
+            flash("Estado cambiado", "success")
         return redirect(url_for("admin_users"))
 
-    edit_permissions = get_user_permissions(edit_user["id"]) if edit_user else []
-    return render_template("admin_users.html", title="Usuarios", user=user, users=list_users(), hacienda_names=allowed_hacienda_names(), edit_user=edit_user, edit_permissions=edit_permissions)
+    users = database.query_all("SELECT * FROM users ORDER BY full_name")
+    staff = [s["name"] for s in database.query_all("SELECT name FROM hacienda_staff WHERE include_flag=1 ORDER BY name")]
+    edit_perms = [p["funcionario_name"] for p in database.query_all("SELECT funcionario_name FROM user_permissions WHERE user_id=?", (edit_id,))] if edit_id else []
+    return render_template("admin_users.html", title="Usuarios", user=user, users=users, hacienda_names=staff, edit_user=edit_user, edit_permissions=edit_perms)
+
+@app.route("/attachments/upload/<radicado>", methods=["POST"])
+def upload_attachment(radicado):
+    user = current_user()
+    if not user: return redirect(url_for("login"))
+    f = request.files.get("file")
+    if f:
+        fn = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{f.filename}"
+        f.save(str(UPLOAD_FOLDER / fn))
+        database.execute("INSERT INTO attachments(radicado, filename, file_path, uploaded_by, uploaded_at) VALUES (?,?,?,?,?)",
+                        (radicado, f.filename, fn, user["username"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        flash("Archivo subido", "success")
+    return redirect(url_for("edit_bpms", radicado=radicado))
+
+@app.route("/attachments/download/<int:id>")
+def download_attachment(id):
+    att = database.query_one("SELECT * FROM attachments WHERE id=?", (id,))
+    return send_file(str(UPLOAD_FOLDER / att["file_path"]), as_attachment=True, download_name=att["filename"]) if att else "No encontrado"
 
 @app.route("/admin/hacienda", methods=["GET","POST"])
 def admin_hacienda():
     user = current_user()
-    if not user or user["role"] != "admin":
-        return redirect(url_for("login"))
-
-    edit_staff_id = request.args.get("edit_staff_id", "")
-    edit_staff = get_staff_by_id(int(edit_staff_id)) if str(edit_staff_id).isdigit() else None
-
+    if not user or user["role"] != "admin": return redirect(url_for("login"))
+    edit_id = request.args.get("edit_staff_id")
+    edit_staff = database.query_one("SELECT * FROM hacienda_staff WHERE id=?", (edit_id,)) if edit_id else None
     if request.method == "POST":
-        action = request.form.get("action","create")
-        if action == "create":
-            name = normalize_text(request.form.get("name",""))
-            status = request.form.get("status","Activo")
-            dependency = request.form.get("dependency","")
-            include_flag = 1 if request.form.get("include_flag") == "on" else 0
-            if name:
-                try:
-                    execute("INSERT INTO hacienda_staff(name,status,dependency,include_flag) VALUES (?,?,?,?)", (name, status, dependency, include_flag))
-                    flash("Funcionario agregado.", "success")
-                except sqlite3.IntegrityError:
-                    flash("Ese funcionario ya existe.", "danger")
-        elif action == "update":
-            staff_id = int(request.form.get("staff_id"))
-            name = normalize_text(request.form.get("name",""))
-            status = request.form.get("status","Activo")
-            dependency = request.form.get("dependency","")
-            include_flag = 1 if request.form.get("include_flag") == "on" else 0
-            try:
-                execute("UPDATE hacienda_staff SET name=?, status=?, dependency=?, include_flag=? WHERE id=?", (name, status, dependency, include_flag, staff_id))
-                flash("Funcionario actualizado.", "success")
-            except sqlite3.IntegrityError:
-                flash("No se pudo actualizar. Ese nombre ya existe.", "danger")
-        elif action == "toggle":
-            staff_id = int(request.form.get("staff_id"))
-            row = query_one("SELECT * FROM hacienda_staff WHERE id=?", (staff_id,))
-            if row:
-                execute("UPDATE hacienda_staff SET include_flag=? WHERE id=?", (0 if int(row["include_flag"]) else 1, staff_id))
-                flash("Inclusión actualizada.", "success")
-        elif action == "sync_users":
-            created = sync_users_from_hacienda()
-            flash(f"Usuarios creados automáticamente: {created}", "success")
+        act = request.form.get("action")
+        if act in ["create", "update"]:
+            name = bpms_service.normalize_text(request.form.get("name"))
+            stat = request.form.get("status")
+            dep = request.form.get("dependency")
+            inc = 1 if request.form.get("include_flag") == "on" else 0
+            if act == "create": database.execute("INSERT INTO hacienda_staff(name,status,dependency,include_flag) VALUES (?,?,?,?)", (name, stat, dep, inc))
+            else: database.execute("UPDATE hacienda_staff SET name=?, status=?, dependency=?, include_flag=? WHERE id=?", (name, stat, dep, inc, int(request.form.get("staff_id"))))
+            flash("Funcionario guardado", "success")
+        elif act == "toggle":
+            sid = request.form.get("staff_id")
+            if sid:
+                database.execute("UPDATE hacienda_staff SET include_flag = CASE WHEN include_flag = 1 THEN 0 ELSE 1 END WHERE id=?", (sid,))
+                flash("Estado de inclusión actualizado", "success")
+            else:
+                flash("Error: ID de funcionario no encontrado", "danger")
+        elif act == "sync_users":
+            staff = database.query_all("SELECT id, name FROM hacienda_staff WHERE include_flag=1")
+            count = 0
+            for s in staff:
+                exists = database.query_one("SELECT id FROM users WHERE full_name=?", (s["name"],))
+                if not exists:
+                    parts = s["name"].split()
+                    if len(parts) >= 3:
+                        # Estructura: Primera letra nombre + primer apellido
+                        # Ejemplo: Jhoan Orlando Arango Jaramillo -> j + arango
+                        first_initial = parts[0][0].lower()
+                        first_surname = parts[2].lower() if len(parts) >= 3 else parts[1].lower()
+                        un = f"{first_initial}{first_surname}"
+                        
+                        if database.query_one("SELECT 1 FROM users WHERE username=?", (un,)):
+                            # Conflicto: añadir primera letra del segundo apellido
+                            second_surname_initial = parts[3][0].lower() if len(parts) >= 4 else ""
+                            un = f"{un}{second_surname_initial}"
+                            
+                            # Si sigue existiendo, añadir ID como último recurso
+                            if database.query_one("SELECT 1 FROM users WHERE username=?", (un,)):
+                                un = f"{un}{s['id']}"
+                    else:
+                        # Fallback para nombres cortos (ej: Juan Perez)
+                        un = (parts[0][0] + parts[-1]).lower()
+                        if database.query_one("SELECT 1 FROM users WHERE username=?", (un,)):
+                            un = f"{un}{s['id']}"
+
+                    database.execute("INSERT INTO users(username, password_hash, role, full_name, is_active, force_password_change) VALUES (?,?,?,?,?,?)",
+                                     (un, hash_password("123456"), "user", s["name"], 1, 1))
+                    uid = database.query_one("SELECT id FROM users WHERE username=?", (un,))["id"]
+                    database.execute("INSERT INTO user_permissions(user_id, funcionario_name) VALUES (?,?)", (uid, s["name"]))
+                    count += 1
+            flash(f"Se crearon {count} nuevos usuarios automáticamente", "success" if count > 0 else "info")
         return redirect(url_for("admin_hacienda"))
+    staff = database.query_all("SELECT * FROM hacienda_staff ORDER BY name")
+    return render_template("admin_hacienda.html", title="Hacienda", user=user, staff=staff, edit_staff=edit_staff)
 
-    return render_template("admin_hacienda.html", title="Lista Hacienda", user=user, staff=list_hacienda_staff(), edit_staff=edit_staff)
-
-@app.route("/admin/upload", methods=["GET","POST"])
+@app.route("/admin/upload", methods=["POST","GET"])
 def admin_upload():
     user = current_user()
-    if not user or user["role"] != "admin":
-        return redirect(url_for("login"))
+    if not user or user["role"] != "admin": return redirect(url_for("login"))
     if request.method == "POST":
-        file = request.files.get("report")
-        if file and file.filename.endswith(".xlsx"):
-            try:
-                file.save(REPORT_PATH)
-                flash("Archivo Excel actualizado correctamente.", "success")
-                return redirect(url_for("dashboard"))
-            except Exception as e:
-                log_error("admin_upload", e)
-                flash("Error al guardar el archivo.", "danger")
-        else:
-            flash("Por favor selecciona un archivo .xlsx válido.", "danger")
-    return render_template("upload.html", title="Cargar Excel", user=user)
+        f = request.files.get("report")
+        if f and f.filename.endswith(".xlsx"):
+            f.save(os.getenv("REPORT_PATH", "Reporte BPMS.xlsx"))
+            bpms_service.load_bpms(force_reload=True)
+            flash("Excel actualizado", "success")
+            return redirect(url_for("dashboard"))
+    return render_template("upload.html", title="Cargar", user=user)
+
+@app.route("/change-password", methods=["GET","POST"])
+def change_password():
+    user = current_user()
+    if not user: return redirect(url_for("login"))
+    if request.method == "POST":
+        old, new, conf = request.form.get("old_password"), request.form.get("new_password"), request.form.get("confirm_password")
+        if hash_password(old) == user["password_hash"] and len(new) >= 6 and new == conf:
+            database.execute("UPDATE users SET password_hash=?, force_password_change=0 WHERE id=?", (hash_password(new), user["id"]))
+            flash("Clave cambiada", "success")
+            return redirect(url_for("dashboard"))
+        flash("Error en los datos", "danger")
+    return render_template("change_password.html", title="Clave", user=user, force_mode=int(user["force_password_change"])==1)
+
+@app.route("/ranking")
+def ranking():
+    user = current_user()
+    if not user: return redirect(url_for("login"))
+    df = bpms_service.get_filtered_data(user, request.args.get("funcionario","TODOS"), request.args.get("estado","TODOS"), request.args.get("buscar",""))
+    rank = []
+    if not df.empty:
+        grp = df.groupby("FUNCIONARIO").agg(TOTAL=("RADICADO", "count"), EN_MARCHA=("CONTROL_VENCIMIENTO", lambda s: int((s == "EN MARCHA").sum())), VENCIDOS=("CONTROL_VENCIMIENTO", lambda s: int((s == "VENCIDO").sum()))).reset_index().sort_values("TOTAL", ascending=False)
+        rank = grp.to_dict("records")
+    return render_template("ranking.html", title="Ranking", user=user, ranking_rows=rank, funcionario_actual=request.args.get("funcionario","TODOS"))
+
+@app.route("/export/preview")
+def export_preview():
+    user = current_user()
+    if not user: return redirect(url_for("login"))
+    func, stat, seek = request.args.get("funcionario","TODOS"), request.args.get("estado","TODOS"), request.args.get("buscar","")
+    df = bpms_service.get_filtered_data(user, func, stat, seek)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Reporte")
+    output.seek(0)
+    fn = f"Reporte_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return send_file(output, as_attachment=True, download_name=fn, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+
+@app.route("/admin/export/<target>")
+def admin_export(target):
+    user = current_user()
+    if not user or user["role"] != "admin": return redirect(url_for("login"))
+    
+    fmt = request.args.get("fmt", "excel")
+    data = []
+    
+    if target == "hacienda":
+        data = database.query_all("SELECT name, status, dependency FROM hacienda_staff ORDER BY name")
+        title = "Reporte de Funcionarios"
+    elif target == "users":
+        data = database.query_all("SELECT username, role, full_name, is_active FROM users ORDER BY full_name")
+        title = "Reporte de Usuarios"
+    elif target == "audit":
+        uid = request.args.get("user_id", "")
+        start = request.args.get("start_date", "")
+        end = request.args.get("end_date", "")
+        query = "SELECT a.created_at, u.username, a.action, a.radicado FROM audit_logs a LEFT JOIN users u ON a.user_id = u.id WHERE 1=1"
+        params = []
+        if uid: query += " AND a.user_id = ?"; params.append(uid)
+        if start: query += " AND a.created_at >= ?"; params.append(f"{start} 00:00:00")
+        if end: query += " AND a.created_at <= ?"; params.append(f"{end} 23:59:59")
+        query += " ORDER BY a.created_at DESC LIMIT 1000"
+        data = database.query_all(query, tuple(params))
+        title = "Historial de Auditoría"
+    else:
+        return "Objetivo no válido", 400
+
+    if fmt == "excel":
+        df = pd.DataFrame(data)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name=target.capitalize())
+        output.seek(0)
+        fn = f"Export_{target}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        return send_file(output, as_attachment=True, download_name=fn, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    
+    elif fmt == "pdf":
+        output = io.BytesIO()
+        doc = SimpleDocTemplate(output, pagesize=landscape(letter))
+        elements = []
+        styles = getSampleStyleSheet()
+        elements.append(Paragraph(f"<b>{title}</b>", styles['Title']))
+        elements.append(Paragraph(f"Generado el: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        
+        if data:
+            headers = list(data[0].keys())
+            table_data = [headers] + [[str(row[h]) for h in headers] for row in data]
+            t = Table(table_data)
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.beige if not user.get('theme')=='dark' else colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            elements.append(t)
+        
+        doc.build(elements)
+        output.seek(0)
+        fn = f"Export_{target}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return send_file(output, as_attachment=True, download_name=fn, mimetype="application/pdf")
+
+    return "Formato no soportado", 400
 
 if __name__ == "__main__":
-    init_db()
-    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    database.init_db(hash_fn=hash_password)
+    app.run(host="0.0.0.0", port=5000, debug=True)

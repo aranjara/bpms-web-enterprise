@@ -1,1 +1,73 @@
-<!doctype html><html lang='es'><head><meta charset='utf-8'><title>{{ title or 'Control BPMS Web' }}</title><link rel='stylesheet' href='{{ url_for("static", filename="styles.css") }}'></head><body><header class='topbar'><div><h1>Control BPMS Web</h1><div class='sub'>Usuario: {{ user["username"] }} | Rol: {{ user["role"] }}</div></div><div class='nav-right'>{% if user["role"] == "admin" %}<a class='navbtn' href='{{ url_for("admin_users") }}'>Usuarios</a><a class='navbtn' href='{{ url_for("admin_hacienda") }}'>Lista Hacienda</a><a class='navbtn' href='{{ url_for("admin_upload") }}'>Cargar Excel</a>{% endif %}<a class='navbtn' href='{{ url_for("dashboard") }}'>Dashboard</a><a class='navbtn' href='{{ url_for("ranking", funcionario=request.args.get("funcionario", "TODOS"), estado=request.args.get("estado", "TODOS"), buscar=request.args.get("buscar", "")) }}'>Ranking</a><a class='navbtn' href='{{ url_for("change_password") }}'>Cambiar contraseña</a><a class='logout' href='{{ url_for("logout") }}'>Cerrar sesión</a></div></header><main>{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class='flash {{ category }} pageflash'>{{ message }}</div>{% endfor %}{% endwith %}{% block content %}{% endblock %}</main></body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPMS Web Enterprise - {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+</head>
+<body class="{% if request.cookies.get('theme') == 'dark' %}dark-mode{% endif %}">
+    {% if user %}
+    <header class="topbar">
+        <div class="topbar-left">
+            <h1>Control BPMS</h1>
+            <div class="sub">Versión 1.1</div>
+        </div>
+        
+        <nav class="nav-right">
+            <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
+                {% if request.cookies.get('theme') == 'dark' %}☀️{% else %}🌙{% endif %}
+            </button>
+            
+            <a href="{{ url_for('dashboard') }}" class="navbtn">📊 Dashboard</a>
+            <a href="{{ url_for('registros') }}" class="navbtn">📝 Registros</a>
+            
+            {% if user.role == 'admin' %}
+            <a href="{{ url_for('admin_hacienda') }}" class="navbtn">🏛️ Funcionarios</a>
+            <a href="{{ url_for('admin_users') }}" class="navbtn">👥 Usuarios</a>
+            <a href="{{ url_for('admin_upload') }}" class="navbtn">📤 Cargar Datos</a>
+            <a href="{{ url_for('admin_audit') }}" class="navbtn">📜 Auditoría</a>
+            {% endif %}
+            
+            <a href="{{ url_for('change_password') }}" class="navbtn">🔑 Cambiar Clave</a>
+            <span class="user-badge" style="margin-left: 10px; font-weight: 600;">{{ user.username }}</span>
+            <a href="{{ url_for('logout') }}" class="logout">Cerrar Sesión</a>
+        </nav>
+    </header>
+    {% endif %}
+
+    <main class="content">
+        <div class="pageflash">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+        
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        document.getElementById('themeToggle')?.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark-mode');
+            document.cookie = `theme=${isDark ? 'dark' : 'light'}; path=/; max-age=31536000`;
+            document.getElementById('themeToggle').textContent = isDark ? '☀️' : '🌙';
+            
+            // Re-render charts if they exist to adapt to dark mode
+            if (window.renderCharts) window.renderCharts();
+        });
+
+        // Initialize tooltips or animations if needed
+    </script>
+</body>
+</html>

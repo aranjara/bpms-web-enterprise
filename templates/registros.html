@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block content %}
+<form class="filters glass" method="get" id="filterForm" style="margin-top: 1rem;">
+    <div class="field">
+        <label>Funcionario</label>
+        <select name="funcionario" onchange="this.form.submit()">
+            {% for f in funcionarios %}
+            <option value="{{ f }}" {% if f == funcionario_actual %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <div class="field">
+        <label>Estado</label>
+        <select name="estado" onchange="this.form.submit()">
+            {% for e in ["TODOS","EN MARCHA","POR VENCER","VENCIDO","SIN FECHA"] %}
+            <option value="{{ e }}" {% if e == estado_actual %}selected{% endif %}>{{ e }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="field" style="flex-grow: 1;">
+        <label>Búsqueda Rápida</label>
+        <input type="text" name="buscar" value="{{ buscar_actual }}" placeholder="Radicado, texto, etc...">
+    </div>
+
+    <div style="display: flex; gap: 0.5rem; align-self: flex-end;">
+        <button type="submit" class="btn btn-primary">🔍 Buscar</button>
+        <a href="{{ url_for('registros') }}" class="btn btn-muted">🧹 Limpiar</a>
+        <a href="{{ url_for('export_preview', funcionario=funcionario_actual, estado=estado_actual, buscar=buscar_actual) }}" class="btn btn-success">📥 Exportar Datos</a>
+    </div>
+</form>
+
+<div class="active-filter" style="margin-left: 2rem; margin-top: 0.5rem;">
+    <small>Filtrando por: <b>{{ funcionario_actual }}</b> | <b>{{ estado_actual }}</b> | <b>{{ buscar_actual or "Todo" }}</b></small>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Radicado</th>
+                <th>Funcionario</th>
+                <th>Tipo Solicitud</th>
+                <th>Vencimiento</th>
+                <th>Días</th>
+                <th>Control</th>
+                <th>Estado Actual</th>
+                <th>Observaciones</th>
+                <th>Acción</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr class="status-{{ row.CONTROL_VENCIMIENTO|lower|replace(' ','-') }}">
+                <td style="font-weight: 700;">{{ row.RADICADO }}</td>
+                <td>{{ row.FUNCIONARIO }}</td>
+                <td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ row.TIPO_SOLICITUD }}">{{ row.TIPO_SOLICITUD }}</td>
+                <td>{{ row.FECHA_VENCIMIENTO }}</td>
+                <td style="text-align: center;">{{ row.DIAS_RESTANTES }}</td>
+                <td><span class="badge">{{ row.CONTROL_VENCIMIENTO }}</span></td>
+                <td>{{ row.ESTADO_TRAMITE_ACTUAL }}</td>
+                <td>{{ row.OBSERVACIONES }}</td>
+                <td>
+                    <a class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" href="{{ url_for('edit_bpms', radicado=row.RADICADO) }}">Editar</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+            <span class="page-link active">{{ p }}</span>
+        {% elif p <= 5 or p > total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+            <a class="page-link" href="{{ url_for('registros', page=p, funcionario=funcionario_actual, estado=estado_actual, buscar=buscar_actual) }}">{{ p }}</a>
+        {% elif p == 6 or p == total_pages - 2 %}
+            <span class="page-link">...</span>
+        {% endif %}
+    {% endfor %}
+</nav>
+{% endif %}
+
+<script>
+    window.addEventListener('load', () => {
+        gsap.from("tbody tr", {
+            duration: 0.5,
+            x: -20,
+            opacity: 0,
+            stagger: 0.05,
+            scrollTrigger: {
+                trigger: "table",
+                start: "top 80%"
+            }
+        });
+    });
+</script>
+{% endblock %}

@@ -11,3 +11,9 @@ env/
 # Ignorar archivos del sistema
 Thumbs.db
 desktop.ini
+
+# Bases de datos y archivos locales
+*.db
+.env
+*.log
+uploads/

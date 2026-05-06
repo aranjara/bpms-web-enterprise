@@ -1,1 +1,75 @@
-{% extends "base.html" %}{% block content %}<div class='panel narrow'><h2>Editar Radicado {{ radicado }}</h2><div class='edit-meta'><b>Funcionario:</b> {{ row["FUNCIONARIO"] }}<br><b>Tipo solicitud:</b> {{ row["TIPO_SOLICITUD"] }}</div><form method='post' class='stack'><label>Estado trámite actual</label><input type='text' name='estado' value='{{ data["estado_tramite_actual"] if data else row["ESTADO_TRAMITE_ACTUAL"] }}'><label>Fecha vencimiento</label><input type='date' name='fecha' value='{{ current_fecha }}'><label>Observaciones</label><textarea name='observaciones' rows='5'>{{ data["observaciones"] if data else row["OBSERVACIONES"] }}</textarea><div class='button-row'><button type='submit'>Guardar</button><a class='clear' href='{{ url_for("dashboard") }}'>Cancelar</a></div></form></div>{% endblock %}
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel narrow">
+    <h2>✏️ Editar Radicado: {{ radicado }}</h2>
+    <div class="edit-meta">
+        <p><b>Funcionario Original:</b> {{ row.FUNCIONARIO }}</p>
+        <p><b>Tipo de Solicitud:</b> {{ row.TIPO_SOLICITUD }}</p>
+    </div>
+
+    <form method="post" class="stack">
+        <div class="field">
+            <label>Estado de Trámite Actual</label>
+            <input type="text" name="estado" value="{{ data.estado_tramite_actual or row.ESTADO_TRAMITE_ACTUAL }}" placeholder="Ej: En revisión, Finalizado...">
+        </div>
+
+        <div class="field">
+            <label>Fecha de Vencimiento</label>
+            <input type="date" name="fecha" value="{{ current_fecha }}">
+            <small>Fecha actual en sistema: {{ row.FECHA_VENCIMIENTO or 'N/A' }}</small>
+        </div>
+
+        <div class="field">
+            <label>Observaciones / Avances</label>
+            <textarea name="observaciones" rows="5" placeholder="Escribe aquí los detalles del avance...">{{ data.observaciones or row.OBSERVACIONES }}</textarea>
+        </div>
+
+        <div class="button-row">
+            <button type="submit" class="btn btn-primary">💾 Guardar Cambios</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-muted">❌ Cancelar</a>
+        </div>
+    </form>
+
+    <hr style="margin: 2rem 0; border: none; border-top: 1px solid var(--border);">
+
+    <h3>📁 Archivos Adjuntos</h3>
+    <form action="{{ url_for('upload_attachment', radicado=radicado) }}" method="post" enctype="multipart/form-data" class="stack" style="margin-top: 1rem;">
+        <div class="field">
+            <label>Subir nuevo archivo (PDF, Imagen, Doc, etc.)</label>
+            <input type="file" name="file" required>
+        </div>
+        <button type="submit" class="btn btn-secondary">📤 Subir Archivo</button>
+    </form>
+
+    <div class="table-wrap" style="padding: 1rem 0 0; margin-top: 1rem;">
+        {% if attachments %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Archivo</th>
+                    <th>Subido por</th>
+                    <th>Fecha</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for att in attachments %}
+                <tr>
+                    <td>{{ att.filename }}</td>
+                    <td>{{ att.uploaded_by }}</td>
+                    <td><small>{{ att.uploaded_at }}</small></td>
+                    <td>
+                        <a href="{{ url_for('download_attachment', id=att.id) }}" class="btn btn-success" style="padding: 4px 8px; font-size: 11px;">⬇️ Descargar</a>
+                        <a href="{{ url_for('delete_attachment', id=att.id) }}" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="return confirm('¿Eliminar este archivo?')">🗑️</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="text-align: center; color: var(--text-muted); padding: 1rem;">No hay archivos adjuntos para este radicado.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

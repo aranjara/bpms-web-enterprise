@@ -1,1 +1,103 @@
-{% extends "base.html" %}{% block content %}<section class='admin-grid'><div class='panel'><h2>{{ 'Editar funcionario' if edit_staff else 'Agregar a Lista Hacienda' }}</h2><form method='post' class='stack'><input type='hidden' name='action' value='{{ "update" if edit_staff else "create" }}'>{% if edit_staff %}<input type='hidden' name='staff_id' value='{{ edit_staff["id"] }}'>{% endif %}<label>Nombre</label><input type='text' name='name' value='{{ edit_staff["name"] if edit_staff else "" }}' required><label>Estado</label><select name='status'><option value='Activo' {% if edit_staff and edit_staff["status"]=="Activo" %}selected{% endif %}>Activo</option><option value='Retirado' {% if edit_staff and edit_staff["status"]=="Retirado" %}selected{% endif %}>Retirado</option></select><label>Dependencia</label><input type='text' name='dependency' value='{{ edit_staff["dependency"] if edit_staff else "" }}'><label><input type='checkbox' name='include_flag' {% if not edit_staff or edit_staff["include_flag"] %}checked{% endif %}> Incluir en el control</label><button type='submit'>{{ 'Actualizar funcionario' if edit_staff else 'Agregar' }}</button>{% if edit_staff %}<a class='clear' href='{{ url_for("admin_hacienda") }}'>Cancelar edición</a>{% endif %}</form><form method='post' style='margin-top:16px;'><input type='hidden' name='action' value='sync_users'><button type='submit'>Sincronizar usuarios con Lista Hacienda</button></form></div><div class='panel'><h2>Funcionarios Hacienda</h2><table><thead><tr><th>Nombre</th><th>Estado</th><th>Dependencia</th><th>Incluido</th><th>Acción</th></tr></thead><tbody>{% for r in staff %}<tr><td>{{ r["name"] }}</td><td>{{ r["status"] }}</td><td>{{ r["dependency"] }}</td><td>{{ r["include_flag"] }}</td><td><a class='edit-btn' href='{{ url_for("admin_hacienda", edit_staff_id=r["id"]) }}'>Editar</a> <form method='post' style='display:inline-block;'><input type='hidden' name='action' value='toggle'><input type='hidden' name='staff_id' value='{{ r["id"] }}'><button type='submit'>{{ "Excluir" if r["include_flag"] else "Incluir" }}</button></form></td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends "base.html" %}
+
+{% block content %}
+<div class="admin-grid">
+    <div class="panel">
+        <h2>{% if edit_staff %}📝 Editar Funcionario{% else %}➕ Agregar Funcionario{% endif %}</h2>
+        <form method="post" class="stack">
+            <input type="hidden" name="action" value="{% if edit_staff %}update{% else %}create{% endif %}">
+            {% if edit_staff %}<input type="hidden" name="staff_id" value="{{ edit_staff.id }}">{% endif %}
+            
+            <div class="field">
+                <label>Nombre del Funcionario</label>
+                <input type="text" name="name" value="{{ edit_staff.name if edit_staff else '' }}" required placeholder="Tal cual aparece en el Excel">
+            </div>
+            
+            <div class="field">
+                <label>Estado</label>
+                <select name="status">
+                    <option value="Activo" {% if edit_staff and edit_staff.status == 'Activo' %}selected{% endif %}>Activo</option>
+                    <option value="Inactivo" {% if edit_staff and edit_staff.status == 'Inactivo' %}selected{% endif %}>Inactivo</option>
+                </select>
+            </div>
+            
+            <div class="field">
+                <label>Dependencia</label>
+                <input type="text" name="dependency" value="{{ edit_staff.dependency if edit_staff else '' }}" placeholder="Opcional">
+            </div>
+
+            <div class="field" style="flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.5rem 0;">
+                <input type="checkbox" name="include_flag" id="include_flag" {% if not edit_staff or edit_staff.include_flag %}checked{% endif %}>
+                <label for="include_flag">Incluir en Dashboard / Filtros</label>
+            </div>
+
+            <div class="button-row">
+                <button type="submit" class="btn btn-primary">{% if edit_staff %}Actualizar{% else %}Agregar{% endif %}</button>
+                {% if edit_staff %}
+                <a href="{{ url_for('admin_hacienda') }}" class="btn btn-muted">Cancelar</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <hr style="margin: 2rem 0; border: none; border-top: 1px solid var(--border);">
+        
+        <h3>⚙️ Acciones Masivas</h3>
+        <form method="post" style="margin-top: 1rem;">
+            <input type="hidden" name="action" value="sync_users">
+            <button type="submit" class="btn btn-secondary" style="width: 100%;">🔄 Sincronizar Usuarios</button>
+            <p><small style="color: var(--text-muted); display: block; margin-top: 0.5rem;">Crea usuarios automáticamente para los funcionarios marcados como incluidos que aún no tengan cuenta.</small></p>
+        </form>
+    </div>
+
+    <div class="panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; position: relative; z-index: 1050;">
+            <h2>🏛️ Funcionarios Registrados</h2>
+            <div class="export-dropdown">
+                <button class="btn btn-success" style="padding: 6px 12px; font-size: 13px;">📥 Exportar Datos ▾</button>
+                <div class="export-menu">
+                    <a href="{{ url_for('admin_export', target='hacienda', fmt='excel') }}" class="export-item">📊 Archivo Excel (.xlsx)</a>
+                    <a href="{{ url_for('admin_export', target='hacienda', fmt='pdf') }}" class="export-item">📄 Documento PDF (.pdf)</a>
+                </div>
+            </div>
+        </div>
+        <div class="table-wrap" style="padding: 0; margin-top: 1rem;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Funcionario</th>
+                        <th>Estado</th>
+                        <th>Inclusión</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in staff %}
+                    <tr>
+                        <td>
+                            <b>{{ s.name }}</b><br>
+                            <small>{{ s.dependency or '-' }}</small>
+                        </td>
+                        <td><span class="badge">{{ s.status }}</span></td>
+                        <td>
+                            <span class="badge" style="background: {{ 'var(--success)' if s.include_flag else 'var(--text-muted)' }}; color: white;">
+                                {{ 'INCLUIDO' if s.include_flag else 'EXCLUIDO' }}
+                            </span>
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.25rem;">
+                                <a href="{{ url_for('admin_hacienda', edit_staff_id=s.id) }}" class="btn btn-secondary" style="padding: 4px 8px; font-size: 10px;">✏️</a>
+                                <form method="post" style="display:inline;">
+                                    <input type="hidden" name="action" value="toggle">
+                                    <input type="hidden" name="staff_id" value="{{ s.id }}">
+                                    <button type="submit" class="btn btn-muted" style="padding: 4px 8px; font-size: 10px;" title="Alternar Inclusión">👁️</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

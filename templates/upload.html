@@ -1,17 +1,23 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="card" style="max-width: 500px; margin: 40px auto;">
-    <h2>Cargar Nuevo Reporte Excel</h2>
-    <p>Selecciona el archivo <strong>Reporte BPMS.xlsx</strong> actualizado. Este archivo reemplazará al actual en el servidor.</p>
+<div class="panel narrow">
+    <h2>📤 Cargar Reporte BPMS (.xlsx)</h2>
+    <p style="margin-bottom: 1.5rem;"><small style="color: var(--text-muted)">Sube el archivo Excel oficial para actualizar la base de datos de trámites.</small></p>
     
-    <form method="POST" enctype="multipart/form-data">
-        <div class="form-group" style="margin: 20px 0;">
-            <label for="report">Archivo Excel (.xlsx):</label>
-            <input type="file" name="report" id="report" accept=".xlsx" required style="display: block; margin-top: 10px;">
+    <div class="flash info" style="background: rgba(76, 201, 240, 0.1); color: var(--primary); border: 1px solid rgba(76, 201, 240, 0.2);">
+        ℹ️ El sistema buscará las columnas de radicados, funcionarios y fechas automáticamente. Los datos manuales guardados previamente no se perderán.
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="stack" style="margin-top: 1.5rem;">
+        <div class="field">
+            <label>Seleccionar Archivo Excel</label>
+            <input type="file" name="report" accept=".xlsx" required style="padding: 2rem; border: 2px dashed var(--border); text-align: center;">
         </div>
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Subir y Actualizar</button>
-            <a href="{{ url_for('dashboard') }}" class="btn">Cancelar</a>
+        
+        <div class="button-row">
+            <button type="submit" class="btn btn-primary">🚀 Iniciar Carga y Procesamiento</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-muted">Cancelar</a>
         </div>
     </form>
 </div>

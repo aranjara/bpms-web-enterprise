@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel narrow" style="max-width: 1100px;">
+    <h2>📜 Historial de Auditoría</h2>
+    <p><small>Registro detallado de acciones realizadas en el sistema.</small></p>
+
+    <form class="filters glass" method="get" style="margin-top: 1.5rem; padding: 1.2rem; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 1.2rem; position: relative; z-index: 1050; overflow: visible !important;">
+        <div class="field" style="flex: 2; min-width: 200px;">
+            <label>Filtrar por Usuario</label>
+            <select name="user_id">
+                <option value="">-- Todos los Usuarios --</option>
+                {% for u in users_list %}
+                <option value="{{ u.id }}" {% if current_uid == u.id|string %}selected{% endif %}>{{ u.full_name }} ({{ u.username }})</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="field" style="flex: 1; min-width: 140px;">
+            <label>Desde</label>
+            <input type="date" name="start_date" value="{{ current_start }}">
+        </div>
+
+        <div class="field" style="flex: 1; min-width: 140px;">
+            <label>Hasta</label>
+            <input type="date" name="end_date" value="{{ current_end }}">
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; align-items: center; padding-bottom: 2px;">
+            <button type="submit" class="btn btn-primary" style="height: 38px;">🔍 Filtrar</button>
+            <a href="{{ url_for('admin_audit') }}" class="btn btn-muted" style="height: 38px; display: flex; align-items: center;">🧹 Limpiar</a>
+            <div class="export-dropdown">
+                <button type="button" class="btn btn-success" style="padding: 6px 12px; font-size: 13px; height: 38px;">📥 Exportar Datos ▾</button>
+                <div class="export-menu">
+                    <a href="{{ url_for('admin_export', target='audit', fmt='excel', user_id=current_uid, start_date=current_start, end_date=current_end) }}" class="export-item">📊 Archivo Excel (.xlsx)</a>
+                    <a href="{{ url_for('admin_export', target='audit', fmt='pdf', user_id=current_uid, start_date=current_start, end_date=current_end) }}" class="export-item">📄 Documento PDF (.pdf)</a>
+                </div>
+            </div>
+        </div>
+    </form>
+    
+    <div class="table-wrap" style="padding: 0; margin-top: 2rem;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha y Hora</th>
+                    <th>Usuario</th>
+                    <th>Acción</th>
+                    <th>Radicado</th>
+                    <th>Detalles</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td style="white-space: nowrap;">{{ log.created_at }}</td>
+                    <td><span class="badge" style="background: var(--bg); border: 1px solid var(--border); font-weight: 600;">{{ log.username or 'SISTEMA' }}</span></td>
+                    <td><b style="font-size: 11px; color: var(--primary);">{{ log.action }}</b></td>
+                    <td><b>{{ log.radicado or '-' }}</b></td>
+                    <td><small style="color: var(--text-muted);">{{ log.details }}</small></td>
+                </tr>
+                {% endfor %}
+                {% if not logs %}
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                        No se encontraron registros con los filtros seleccionados.
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    window.addEventListener('load', () => {
+        gsap.from("tbody tr", {
+            duration: 0.4,
+            y: 10,
+            opacity: 0,
+            stagger: 0.02,
+            ease: "power2.out"
+        });
+    });
+</script>
+{% endblock %}

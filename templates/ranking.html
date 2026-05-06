@@ -1,1 +1,41 @@
-{% extends "base.html" %}{% block content %}<div class='panel ranking-panel'><h2>Resumen por Funcionario</h2><div class='active-filter'>Filtro activo: Funcionario = <b>{{ funcionario_actual }}</b> | Estado = <b>{{ estado_actual }}</b> | Buscar = <b>{{ buscar_actual or "N/A" }}</b></div><div class='table-wrap'><table><thead><tr><th>FUNCIONARIO</th><th>TOTAL</th><th>EN_MARCHA</th><th>POR_VENCER</th><th>VENCIDOS</th></tr></thead><tbody>{% for r in ranking_rows %}<tr><td>{{ r.FUNCIONARIO }}</td><td>{{ r.TOTAL }}</td><td>{{ r.EN_MARCHA }}</td><td>{{ r.POR_VENCER }}</td><td>{{ r.VENCIDOS }}</td></tr>{% endfor %}</tbody></table></div></div>{% endblock %}
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel narrow" style="max-width: 900px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2>🏆 Ranking de Productividad</h2>
+        <a href="{{ url_for('dashboard', funcionario=funcionario_actual, estado=estado_actual, buscar=buscar_actual) }}" class="btn btn-muted">⬅️ Volver</a>
+    </div>
+    
+    <p><small style="color: var(--text-muted)">Carga laboral y estado de radicados por funcionario según los filtros actuales.</small></p>
+
+    <div class="table-wrap" style="padding: 0; margin-top: 1rem;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Posición</th>
+                    <th>Funcionario</th>
+                    <th>Total</th>
+                    <th style="color: var(--success)">En Marcha</th>
+                    <th style="color: var(--warning)">Por Vencer</th>
+                    <th style="color: var(--danger)">Vencidos</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in ranking_rows %}
+                <tr>
+                    <td style="text-align: center; font-weight: 800; font-size: 1.25rem; color: var(--text-muted);">
+                        {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
+                    </td>
+                    <td><b>{{ r.FUNCIONARIO }}</b></td>
+                    <td style="text-align: center;"><strong>{{ r.TOTAL }}</strong></td>
+                    <td style="text-align: center;">{{ r.EN_MARCHA }}</td>
+                    <td style="text-align: center;">{{ r.POR_VENCER }}</td>
+                    <td style="text-align: center; font-weight: 700; color: var(--danger);">{{ r.VENCIDOS }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

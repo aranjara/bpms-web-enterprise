@@ -56,3 +56,10 @@ Ajuste v10:
 - edición de usuarios.
 - cambio obligatorio de clave en primer ingreso si force_password_change=1.
 - última sesión ya queda guardada en last_login_at y visible en usuarios.
+60: 
+61: Ajuste v1.1 (Modernización):
+62: - Rediseño visual premium con Glassmorphism y Modo Oscuro.
+63: - Gráficos interactivos en Dashboard (Chart.js).
+64: - Registro de Auditoría (Audit Log) para administradores.
+65: - Sistema de archivos adjuntos en cada radicado.
+66: - Paginación en Dashboard para mejor rendimiento.

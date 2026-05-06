@@ -7,22 +7,41 @@
         <strong>{{ counts.total }}</strong>
     </div>
     <div class="card">
-        <span style="color: #475569">En Marcha</span>
+        <span>En Marcha</span>
         <strong>{{ counts.en_marcha }}</strong>
     </div>
     <div class="card">
-        <span style="color: #64748b">Por Vencer</span>
+        <span>Por Vencer</span>
         <strong>{{ counts.por_vencer }}</strong>
     </div>
     <div class="card">
-        <span style="color: #1e293b">Vencidos</span>
+        <span>Vencidos</span>
         <strong>{{ counts.vencidos }}</strong>
     </div>
     <div class="card">
-        <span style="color: #94a3b8">Sin Fecha</span>
+        <span>Sin Fecha</span>
         <strong>{{ counts.sin_fecha }}</strong>
     </div>
 </section>
+
+<!-- Dashboard Slicer -->
+<div class="filters glass" style="margin: 0 2rem 1.5rem; padding: 1.2rem; display: flex; align-items: center; gap: 1rem; border-radius: var(--radius); z-index: 100;">
+    <form method="get" id="dashboardFilter" style="display: flex; align-items: center; gap: 1rem; width: 100%;">
+        <div class="field" style="flex: 1; max-width: 400px; margin-bottom: 0;">
+            <label style="margin-bottom: 4px;">🎯 Filtrar por Funcionario</label>
+            <select name="funcionario" onchange="this.form.submit()" style="width: 100%;">
+                {% for f in funcionarios %}
+                <option value="{{ f }}" {% if funcionario_actual == f %}selected{% endif %}>{{ f }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="margin-top: 18px;">
+            {% if funcionario_actual != 'TODOS' %}
+            <a href="{{ url_for('dashboard') }}" class="btn btn-muted" style="height: 38px; display: flex; align-items: center; font-size: 12px; padding: 0 1rem;">🧹 Ver Todos</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
 
 <div class="charts-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; padding: 0 2rem 2rem;">
     <div class="chart-box" style="height: 350px;">
@@ -57,8 +76,9 @@
                 labels: ['En Marcha', 'Por Vencer', 'Vencidos', 'Sin Fecha'],
                 datasets: [{
                     data: [{{ counts.en_marcha }}, {{ counts.por_vencer }}, {{ counts.vencidos }}, {{ counts.sin_fecha }}],
-                    backgroundColor: ['#475569', '#64748b', '#1e293b', '#94a3b8'],
-                    borderWidth: 0
+                    backgroundColor: ['#3b82f6', '#fbbf24', '#ef4444', '#94a3b8'],
+                    borderWidth: 2,
+                    borderColor: isDark ? '#1e293b' : '#fff'
                 }]
             },
             options: {
@@ -85,7 +105,7 @@
                 datasets: [{
                     label: 'Radicados',
                     data: {{ chart_data.staff_values|tojson }},
-                    backgroundColor: '#475569',
+                    backgroundColor: '#3b82f6',
                     borderRadius: 6
                 }]
             },

@@ -8,7 +8,5 @@ env/
 .git/
 .gitignore
 *.bat
-*.xlsx
-*.db
 error.log
 README.txt

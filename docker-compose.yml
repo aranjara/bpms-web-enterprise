@@ -1,11 +1,15 @@
 services:
   web:
-    build: .
-    container_name: bpms-web-enterprise
-    ports:
-      - "5000:5000"
-    environment:
-      - DB_PATH=/app/bpms_web.db
-      - REPORT_PATH=/app/Informe BPMS.xlsx
-      - LOG_PATH=/app/error.log
-    restart: unless-stopped
+      build: .
+          container_name: bpms-web-enterprise
+              ports:
+                    - '5000:5000'
+                        volumes:
+                              - .:/app
+                                  environment:
+                                        - DB_PATH=/app/bpms_web.db
+                                              - REPORT_PATH=/app/Reporte BPMS.xlsx
+                                                    - LOG_PATH=/app/error.log
+                                                          - UPLOAD_FOLDER=/app/uploads
+                                                              restart: unless-stopped
+                                                              
